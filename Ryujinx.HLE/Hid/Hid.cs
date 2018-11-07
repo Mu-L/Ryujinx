@@ -1,6 +1,5 @@
 ﻿using Ryujinx.Common;
 using Ryujinx.HLE.HOS;
-using System;
 
 namespace Ryujinx.HLE.Input
 {
