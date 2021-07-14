@@ -1,6 +1,7 @@
 using ARMeilleure.Translation.PTC;
 using Gtk;
 using Ryujinx.Common.Configuration;
+using Ryujinx.Common.GraphicsDriver;
 using Ryujinx.Common.Logging;
 using Ryujinx.Common.System;
 using Ryujinx.Common.SystemInfo;
@@ -8,6 +9,7 @@ using Ryujinx.Configuration;
 using Ryujinx.Modules;
 using Ryujinx.Ui;
 using Ryujinx.Ui.Widgets;
+using SixLabors.ImageSharp.Formats.Jpeg;
 using System;
 using System.IO;
 using System.Reflection;
@@ -97,6 +99,12 @@ namespace Ryujinx
             // Initialize Discord integration.
             DiscordIntegrationModule.Initialize();
 
+            // Sets ImageSharp Jpeg Encoder Quality.
+            SixLabors.ImageSharp.Configuration.Default.ImageFormatsManager.SetEncoder(JpegFormat.Instance, new JpegEncoder()
+            {
+                Quality = 100
+            });
+
             string localConfigurationPath   = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Config.json");
             string appDataConfigurationPath = Path.Combine(AppDataManager.BaseDirPath,            "Config.json");
 
@@ -128,13 +136,11 @@ namespace Ryujinx
                 }
             }
 
-            if (startFullscreenArg)
-            {
-                ConfigurationState.Instance.Ui.StartFullscreen.Value = true;
-            }
-
             // Logging system information.
             PrintSystemInfo();
+
+            // Enable OGL multithreading on the driver, when available.
+            DriverUtilities.ToggleOGLThreading(true);
 
             // Initialize Gtk.
             Application.Init();
@@ -147,16 +153,13 @@ namespace Ryujinx
                 UserErrorDialog.CreateUserErrorDialog(UserError.NoKeys);
             }
 
-            // Force dedicated GPU if we can.
-            ForceDedicatedGpu.Nvidia();
-
             // Show the main window UI.
             MainWindow mainWindow = new MainWindow();
             mainWindow.Show();
 
             if (launchPathArg != null)
             {
-                mainWindow.LoadApplication(launchPathArg);
+                mainWindow.LoadApplication(launchPathArg, startFullscreenArg);
             }
 
             if (ConfigurationState.Instance.CheckUpdatesOnStart.Value && Updater.CanUpdate(false))

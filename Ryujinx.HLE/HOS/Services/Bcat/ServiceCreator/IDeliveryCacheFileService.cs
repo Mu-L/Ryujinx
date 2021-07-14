@@ -1,11 +1,10 @@
 ﻿using LibHac;
 using LibHac.Bcat;
 using Ryujinx.Common;
-using System;
 
 namespace Ryujinx.HLE.HOS.Services.Bcat.ServiceCreator
 {
-    class IDeliveryCacheFileService : IpcService, IDisposable
+    class IDeliveryCacheFileService : DisposableIpcService
     {
         private LibHac.Bcat.Detail.Ipc.IDeliveryCacheFileService _base;
 
@@ -30,8 +29,8 @@ namespace Ryujinx.HLE.HOS.Services.Bcat.ServiceCreator
         // Read(u64) -> (u64, buffer<bytes, 6>)
         public ResultCode Read(ServiceCtx context)
         {
-            long position = context.Request.ReceiveBuff[0].Position;
-            long size = context.Request.ReceiveBuff[0].Size;
+            ulong position = context.Request.ReceiveBuff[0].Position;
+            ulong size = context.Request.ReceiveBuff[0].Size;
 
             long offset = context.RequestData.ReadInt64();
 
@@ -39,7 +38,7 @@ namespace Ryujinx.HLE.HOS.Services.Bcat.ServiceCreator
 
             Result result = _base.Read(out long bytesRead, offset, data);
 
-            context.Memory.Write((ulong)position, data);
+            context.Memory.Write(position, data);
 
             context.ResponseData.Write(bytesRead);
 
@@ -68,9 +67,12 @@ namespace Ryujinx.HLE.HOS.Services.Bcat.ServiceCreator
             return (ResultCode)result.Value;
         }
 
-        public void Dispose()
+        protected override void Dispose(bool isDisposing)
         {
-            _base?.Dispose();
+            if (isDisposing)
+            {
+                _base?.Dispose();
+            }
         }
     }
 }

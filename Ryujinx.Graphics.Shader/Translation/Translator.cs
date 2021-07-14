@@ -26,12 +26,12 @@ namespace Ryujinx.Graphics.Shader.Translation
         public static TranslatorContext CreateContext(
             ulong address,
             IGpuAccessor gpuAccessor,
-            TranslationFlags flags,
+            TranslationOptions options,
             TranslationCounts counts = null)
         {
             counts ??= new TranslationCounts();
 
-            Block[][] cfg = DecodeShader(address, gpuAccessor, flags, counts, out ShaderConfig config);
+            Block[][] cfg = DecodeShader(address, gpuAccessor, options, counts, out ShaderConfig config);
 
             return new TranslatorContext(address, cfg, config);
         }
@@ -87,17 +87,15 @@ namespace Ryujinx.Graphics.Shader.Translation
 
             StructuredProgramInfo sInfo = StructuredProgram.MakeStructuredProgram(funcs, config);
 
-            GlslProgram program = GlslGenerator.Generate(sInfo, config);
+            string glslCode = GlslGenerator.Generate(sInfo, config);
 
             shaderProgramInfo = new ShaderProgramInfo(
-                program.CBufferDescriptors,
-                program.SBufferDescriptors,
-                program.TextureDescriptors,
-                program.ImageDescriptors,
+                config.GetConstantBufferDescriptors(),
+                config.GetStorageBufferDescriptors(),
+                config.GetTextureDescriptors(),
+                config.GetImageDescriptors(),
                 config.UsedFeatures.HasFlag(FeatureFlags.InstanceId),
                 config.ClipDistancesWritten);
-
-            string glslCode = program.Code;
 
             return new ShaderProgram(config.Stage, glslCode);
         }
@@ -105,24 +103,24 @@ namespace Ryujinx.Graphics.Shader.Translation
         private static Block[][] DecodeShader(
             ulong address,
             IGpuAccessor gpuAccessor,
-            TranslationFlags flags,
+            TranslationOptions options,
             TranslationCounts counts,
             out ShaderConfig config)
         {
             Block[][] cfg;
             ulong maxEndAddress = 0;
 
-            bool hasBindless = false;
+            bool hasBindless;
 
-            if ((flags & TranslationFlags.Compute) != 0)
+            if ((options.Flags & TranslationFlags.Compute) != 0)
             {
-                config = new ShaderConfig(gpuAccessor, flags, counts);
+                config = new ShaderConfig(gpuAccessor, options, counts);
 
                 cfg = Decoder.Decode(gpuAccessor, address, out hasBindless);
             }
             else
             {
-                config = new ShaderConfig(new ShaderHeader(gpuAccessor, address), gpuAccessor, flags, counts);
+                config = new ShaderConfig(new ShaderHeader(gpuAccessor, address), gpuAccessor, options, counts);
 
                 cfg = Decoder.Decode(gpuAccessor, address + HeaderSize, out hasBindless);
             }
@@ -131,19 +129,20 @@ namespace Ryujinx.Graphics.Shader.Translation
             {
                 config.SetUsedFeature(FeatureFlags.Bindless);
             }
-            else // Not bindless, fill up texture handles
+
+            for (int funcIndex = 0; funcIndex < cfg.Length; funcIndex++)
             {
-                for (int funcIndex = 0; funcIndex < cfg.Length; funcIndex++)
+                for (int blkIndex = 0; blkIndex < cfg[funcIndex].Length; blkIndex++)
                 {
-                    for (int blkIndex = 0; blkIndex < cfg[funcIndex].Length; blkIndex++)
+                    Block block = cfg[funcIndex][blkIndex];
+
+                    if (maxEndAddress < block.EndAddress)
                     {
-                        Block block = cfg[funcIndex][blkIndex];
+                        maxEndAddress = block.EndAddress;
+                    }
 
-                        if (maxEndAddress < block.EndAddress)
-                        {
-                            maxEndAddress = block.EndAddress;
-                        }
-
+                    if (!hasBindless)
+                    {
                         for (int index = 0; index < block.OpCodes.Count; index++)
                         {
                             if (block.OpCodes[index] is OpCodeTextureBase texture)
@@ -155,7 +154,7 @@ namespace Ryujinx.Graphics.Shader.Translation
                 }
             }
 
-            config.SizeAdd((int)maxEndAddress + (flags.HasFlag(TranslationFlags.Compute) ? 0 : HeaderSize));
+            config.SizeAdd((int)maxEndAddress + (options.Flags.HasFlag(TranslationFlags.Compute) ? 0 : HeaderSize));
 
             return cfg;
         }
@@ -198,7 +197,7 @@ namespace Ryujinx.Graphics.Shader.Translation
             {
                 OpCode op = block.OpCodes[opIndex];
 
-                if ((context.Config.Flags & TranslationFlags.DebugMode) != 0)
+                if ((context.Config.Options.Flags & TranslationFlags.DebugMode) != 0)
                 {
                     string instName;
 

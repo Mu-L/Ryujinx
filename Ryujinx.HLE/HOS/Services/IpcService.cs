@@ -109,7 +109,7 @@ namespace Ryujinx.HLE.HOS.Services
 
             bool serviceExists = service.HipcCommands.TryGetValue(commandId, out MethodInfo processRequest);
 
-            if (ServiceConfiguration.IgnoreMissingServices || serviceExists)
+            if (context.Device.Configuration.IgnoreMissingServices || serviceExists)
             {
                 ResultCode result = ResultCode.Success;
 
@@ -163,7 +163,7 @@ namespace Ryujinx.HLE.HOS.Services
 
             bool serviceExists = TipcCommands.TryGetValue(commandId, out MethodInfo processRequest);
 
-            if (ServiceConfiguration.IgnoreMissingServices || serviceExists)
+            if (context.Device.Configuration.IgnoreMissingServices || serviceExists)
             {
                 ResultCode result = ResultCode.Success;
 
@@ -264,6 +264,19 @@ namespace Ryujinx.HLE.HOS.Services
         public void SetParent(IpcService parent)
         {
             _parent = parent._parent;
+        }
+
+        public virtual void DestroyAtExit()
+        {
+            foreach (object domainObject in _domainObjects.Values)
+            {
+                if (domainObject != this && domainObject is IDisposable disposableObj)
+                {
+                    disposableObj.Dispose();
+                }
+            }
+
+            _domainObjects.Clear();
         }
     }
 }

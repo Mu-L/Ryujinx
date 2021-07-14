@@ -1,11 +1,10 @@
 using LibHac;
 using LibHac.Bcat;
-using System;
 using System.Runtime.InteropServices;
 
 namespace Ryujinx.HLE.HOS.Services.Bcat.ServiceCreator
 {
-    class IDeliveryCacheStorageService : IpcService, IDisposable
+    class IDeliveryCacheStorageService : DisposableIpcService
     {
         private LibHac.Bcat.Detail.Ipc.IDeliveryCacheStorageService _base;
 
@@ -46,23 +45,26 @@ namespace Ryujinx.HLE.HOS.Services.Bcat.ServiceCreator
         // EnumerateDeliveryCacheDirectory() -> (u32, buffer<nn::bcat::DirectoryName, 6>)
         public ResultCode EnumerateDeliveryCacheDirectory(ServiceCtx context)
         {
-            long position = context.Request.ReceiveBuff[0].Position;
-            long size = context.Request.ReceiveBuff[0].Size;
+            ulong position = context.Request.ReceiveBuff[0].Position;
+            ulong size = context.Request.ReceiveBuff[0].Size;
 
             byte[] data = new byte[size];
 
             Result result = _base.EnumerateDeliveryCacheDirectory(out int count, MemoryMarshal.Cast<byte, DirectoryName>(data));
 
-            context.Memory.Write((ulong)position, data);
+            context.Memory.Write(position, data);
 
             context.ResponseData.Write(count);
 
             return (ResultCode)result.Value;
         }
 
-        public void Dispose()
+        protected override void Dispose(bool isDisposing)
         {
-            _base?.Dispose();
+            if (isDisposing)
+            {
+                _base?.Dispose();
+            }
         }
     }
 }

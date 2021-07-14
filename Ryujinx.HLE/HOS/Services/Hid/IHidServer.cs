@@ -3,7 +3,10 @@ using Ryujinx.HLE.HOS.Ipc;
 using Ryujinx.HLE.HOS.Kernel.Common;
 using Ryujinx.HLE.HOS.Kernel.Threading;
 using Ryujinx.HLE.HOS.Services.Hid.HidServer;
+using Ryujinx.HLE.HOS.Services.Hid.Types;
 using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
 
 namespace Ryujinx.HLE.HOS.Services.Hid
 {
@@ -19,6 +22,7 @@ namespace Ryujinx.HLE.HOS.Services.Hid
         private bool _unintendedHomeButtonInputProtectionEnabled;
         private bool _vibrationPermitted;
         private bool _usbFullKeyControllerEnabled;
+        private bool _isFirmwareUpdateAvailableForSixAxisSensor;
 
         private HidNpadJoyAssignmentMode      _npadJoyAssignmentMode;
         private HidNpadHandheldActivationMode _npadHandheldActivationMode;
@@ -43,6 +47,8 @@ namespace Ryujinx.HLE.HOS.Services.Hid
             _npadJoyAssignmentMode      = HidNpadJoyAssignmentMode.Dual;
             _npadHandheldActivationMode = HidNpadHandheldActivationMode.Dual;
             _gyroscopeZeroDriftMode     = HidGyroscopeZeroDriftMode.Standard;
+
+            _isFirmwareUpdateAvailableForSixAxisSensor = false;
 
             _sensorFusionParams  = new HidSensorFusionParameters();
             _accelerometerParams = new HidAccelerometerParameters();
@@ -69,6 +75,13 @@ namespace Ryujinx.HLE.HOS.Services.Hid
         {
             long appletResourceUserId = context.RequestData.ReadInt64();
 
+            // Initialize entries to avoid issues with some games.
+
+            for (int entry = 0; entry < Hid.SharedMemEntryCount; entry++)
+            {
+                context.Device.Hid.DebugPad.Update();
+            }
+
             Logger.Stub?.PrintStub(LogClass.ServiceHid, new { appletResourceUserId });
 
             return ResultCode.Success;
@@ -81,6 +94,13 @@ namespace Ryujinx.HLE.HOS.Services.Hid
             long appletResourceUserId = context.RequestData.ReadInt64();
 
             context.Device.Hid.Touchscreen.Active = true;
+
+            // Initialize entries to avoid issues with some games.
+
+            for (int entry = 0; entry < Hid.SharedMemEntryCount; entry++)
+            {
+                context.Device.Hid.Touchscreen.Update();
+            }
 
             Logger.Stub?.PrintStub(LogClass.ServiceHid, new { appletResourceUserId });
 
@@ -95,6 +115,13 @@ namespace Ryujinx.HLE.HOS.Services.Hid
 
             context.Device.Hid.Mouse.Active = true;
 
+            // Initialize entries to avoid issues with some games.
+
+            for (int entry = 0; entry < Hid.SharedMemEntryCount; entry++)
+            {
+                context.Device.Hid.Mouse.Update(0, 0);
+            }
+
             Logger.Stub?.PrintStub(LogClass.ServiceHid, new { appletResourceUserId });
 
             return ResultCode.Success;
@@ -107,6 +134,16 @@ namespace Ryujinx.HLE.HOS.Services.Hid
             long appletResourceUserId = context.RequestData.ReadInt64();
 
             context.Device.Hid.Keyboard.Active = true;
+
+            // Initialize entries to avoid issues with some games.
+
+            KeyboardInput emptyInput = new KeyboardInput();
+            emptyInput.Keys = new ulong[4];
+
+            for (int entry = 0; entry < Hid.SharedMemEntryCount; entry++)
+            {
+                context.Device.Hid.Keyboard.Update(emptyInput);
+            }
 
             Logger.Stub?.PrintStub(LogClass.ServiceHid, new { appletResourceUserId });
 
@@ -540,6 +577,21 @@ namespace Ryujinx.HLE.HOS.Services.Hid
             return ResultCode.Success;
         }
 
+        [CommandHipc(83)] // 6.0.0+
+        // IsFirmwareUpdateAvailableForSixAxisSensor(nn::hid::AppletResourceUserId, nn::hid::SixAxisSensorHandle, pid) -> bool UpdateAvailable
+        public ResultCode IsFirmwareUpdateAvailableForSixAxisSensor(ServiceCtx context)
+        {
+            int  sixAxisSensorHandle  = context.RequestData.ReadInt32();
+            context.RequestData.BaseStream.Position += 4;
+            long appletResourceUserId = context.RequestData.ReadInt64();
+
+            context.ResponseData.Write(_isFirmwareUpdateAvailableForSixAxisSensor);
+
+            Logger.Stub?.PrintStub(LogClass.ServiceHid, new { appletResourceUserId, sixAxisSensorHandle, _isFirmwareUpdateAvailableForSixAxisSensor });
+
+            return ResultCode.Success;
+        }
+
         [CommandHipc(91)]
         // ActivateGesture(nn::applet::AppletResourceUserId, int Unknown0)
         public ResultCode ActivateGesture(ServiceCtx context)
@@ -590,25 +642,22 @@ namespace Ryujinx.HLE.HOS.Services.Hid
         public ResultCode SetSupportedNpadIdType(ServiceCtx context)
         {
             long appletResourceUserId = context.RequestData.ReadInt64();
-            long arraySize = context.Request.PtrBuff[0].Size / 4;
+            ulong arrayPosition = context.Request.PtrBuff[0].Position;
+            ulong arraySize = context.Request.PtrBuff[0].Size;
 
-            NpadIdType[] supportedPlayerIds = new NpadIdType[arraySize];
+            ReadOnlySpan<NpadIdType> supportedPlayerIds = MemoryMarshal.Cast<byte, NpadIdType>(context.Memory.GetSpan(arrayPosition, (int)arraySize));
 
             context.Device.Hid.Npads.ClearSupportedPlayers();
 
-            for (int i = 0; i < arraySize; ++i)
+            for (int i = 0; i < supportedPlayerIds.Length; ++i)
             {
-                NpadIdType id = context.Memory.Read<NpadIdType>((ulong)(context.Request.PtrBuff[0].Position + i * 4));
-
-                if (id >= 0)
+                if (supportedPlayerIds[i] >= 0)
                 {
-                    context.Device.Hid.Npads.SetSupportedPlayer(HidUtils.GetIndexFromNpadIdType(id));
+                    context.Device.Hid.Npads.SetSupportedPlayer(HidUtils.GetIndexFromNpadIdType(supportedPlayerIds[i]));
                 }
-
-                supportedPlayerIds[i] = id;
             }
 
-            Logger.Stub?.PrintStub(LogClass.ServiceHid, $"{arraySize} " + string.Join(",", supportedPlayerIds));
+            Logger.Stub?.PrintStub(LogClass.ServiceHid, $"{supportedPlayerIds.Length} " + string.Join(",", supportedPlayerIds.ToArray()));
 
             return ResultCode.Success;
         }
@@ -620,6 +669,32 @@ namespace Ryujinx.HLE.HOS.Services.Hid
             long appletResourceUserId = context.RequestData.ReadInt64();
 
             context.Device.Hid.Npads.Active = true;
+
+            // Initialize entries to avoid issues with some games.
+
+            List<GamepadInput> emptyGamepadInputs = new List<GamepadInput>();
+            List<SixAxisInput> emptySixAxisInputs = new List<SixAxisInput>();
+
+            for (int player = 0; player < NpadDevices.MaxControllers; player++)
+            {
+                GamepadInput gamepadInput = new GamepadInput();
+                SixAxisInput sixaxisInput = new SixAxisInput();
+
+                gamepadInput.PlayerId = (PlayerIndex)player;
+                sixaxisInput.PlayerId = (PlayerIndex)player;
+
+                sixaxisInput.Orientation = new float[9];
+
+                emptyGamepadInputs.Add(gamepadInput);
+                emptySixAxisInputs.Add(sixaxisInput);
+            }
+
+            for (int entry = 0; entry < Hid.SharedMemEntryCount; entry++)
+            {
+                context.Device.Hid.Npads.Update(emptyGamepadInputs);
+                context.Device.Hid.Npads.UpdateSixAxis(emptySixAxisInputs);
+            }
+
             Logger.Stub?.PrintStub(LogClass.ServiceHid, new { appletResourceUserId });
 
             return ResultCode.Success;
@@ -671,26 +746,62 @@ namespace Ryujinx.HLE.HOS.Services.Hid
         }
 
         [CommandHipc(108)]
-        // GetPlayerLedPattern(uint NpadId) -> ulong LedPattern
+        // GetPlayerLedPattern(u32 npad_id) -> u64 led_pattern
         public ResultCode GetPlayerLedPattern(ServiceCtx context)
         {
-            NpadIdType npadId = (NpadIdType)context.RequestData.ReadInt32();
+            NpadIdType npadId = (NpadIdType)context.RequestData.ReadUInt32();
 
-            long ledPattern = HidUtils.GetLedPatternFromNpadId(npadId);
+            ulong ledPattern = npadId switch
+            {
+                NpadIdType.Player1  => 0b0001,
+                NpadIdType.Player2  => 0b0011,
+                NpadIdType.Player3  => 0b0111,
+                NpadIdType.Player4  => 0b1111,
+                NpadIdType.Player5  => 0b1001,
+                NpadIdType.Player6  => 0b0101,
+                NpadIdType.Player7  => 0b1101,
+                NpadIdType.Player8  => 0b0110,
+                NpadIdType.Unknown  => 0b0000,
+                NpadIdType.Handheld => 0b0000,
+                _ => throw new ArgumentOutOfRangeException(nameof(npadId))
+            };
 
             context.ResponseData.Write(ledPattern);
-
-            Logger.Stub?.PrintStub(LogClass.ServiceHid, new { npadId, ledPattern });
 
             return ResultCode.Success;
         }
 
         [CommandHipc(109)] // 5.0.0+
-        // ActivateNpadWithRevision(nn::applet::AppletResourceUserId, int Unknown)
+        // ActivateNpadWithRevision(nn::applet::AppletResourceUserId, int revision)
         public ResultCode ActivateNpadWithRevision(ServiceCtx context)
         {
             int  revision             = context.RequestData.ReadInt32();
             long appletResourceUserId = context.RequestData.ReadInt64();
+
+            // Initialize entries to avoid issues with some games.
+
+            List<GamepadInput> emptyGamepadInputs = new List<GamepadInput>();
+            List<SixAxisInput> emptySixAxisInputs = new List<SixAxisInput>();
+
+            for (int player = 0; player < NpadDevices.MaxControllers; player++)
+            {
+                GamepadInput gamepadInput = new GamepadInput();
+                SixAxisInput sixaxisInput = new SixAxisInput();
+
+                gamepadInput.PlayerId = (PlayerIndex)player;
+                sixaxisInput.PlayerId = (PlayerIndex)player;
+
+                sixaxisInput.Orientation = new float[9];
+
+                emptyGamepadInputs.Add(gamepadInput);
+                emptySixAxisInputs.Add(sixaxisInput);
+            }
+
+            for (int entry = 0; entry < Hid.SharedMemEntryCount; entry++)
+            {
+                context.Device.Hid.Npads.Update(emptyGamepadInputs);
+                context.Device.Hid.Npads.UpdateSixAxis(emptySixAxisInputs);
+            }
 
             Logger.Stub?.PrintStub(LogClass.ServiceHid, new { appletResourceUserId, revision });
 
@@ -698,32 +809,46 @@ namespace Ryujinx.HLE.HOS.Services.Hid
         }
 
         [CommandHipc(120)]
-        // SetNpadJoyHoldType(nn::applet::AppletResourceUserId, long NpadJoyHoldType)
+        // SetNpadJoyHoldType(nn::applet::AppletResourceUserId, ulong NpadJoyHoldType)
         public ResultCode SetNpadJoyHoldType(ServiceCtx context)
         {
             long appletResourceUserId = context.RequestData.ReadInt64();
-            context.Device.Hid.Npads.JoyHold = (NpadJoyHoldType)context.RequestData.ReadInt64();
 
-            Logger.Stub?.PrintStub(LogClass.ServiceHid, new {
-                    appletResourceUserId,
-                    context.Device.Hid.Npads.JoyHold
-                });
+            NpadJoyHoldType npadJoyHoldType = (NpadJoyHoldType)context.RequestData.ReadUInt64();
+
+            if (npadJoyHoldType > NpadJoyHoldType.Horizontal)
+            {
+                throw new ArgumentOutOfRangeException(nameof(npadJoyHoldType));
+            }
+
+            foreach (PlayerIndex playerIndex in context.Device.Hid.Npads.GetSupportedPlayers())
+            {
+                if (HidUtils.GetNpadIdTypeFromIndex(playerIndex) > NpadIdType.Handheld)
+                {
+                    return ResultCode.InvalidNpadIdType;
+                }
+            }
+
+            context.Device.Hid.Npads.JoyHold = npadJoyHoldType;
 
             return ResultCode.Success;
         }
 
         [CommandHipc(121)]
-        // GetNpadJoyHoldType(nn::applet::AppletResourceUserId) -> long NpadJoyHoldType
+        // GetNpadJoyHoldType(nn::applet::AppletResourceUserId) -> ulong NpadJoyHoldType
         public ResultCode GetNpadJoyHoldType(ServiceCtx context)
         {
             long appletResourceUserId = context.RequestData.ReadInt64();
 
-            context.ResponseData.Write((long)context.Device.Hid.Npads.JoyHold);
+            foreach (PlayerIndex playerIndex in context.Device.Hid.Npads.GetSupportedPlayers())
+            {
+                if (HidUtils.GetNpadIdTypeFromIndex(playerIndex) > NpadIdType.Handheld)
+                {
+                    return ResultCode.InvalidNpadIdType;
+                }
+            }
 
-            Logger.Stub?.PrintStub(LogClass.ServiceHid, new {
-                    appletResourceUserId,
-                    context.Device.Hid.Npads.JoyHold
-                });
+            context.ResponseData.Write((ulong)context.Device.Hid.Npads.JoyHold);
 
             return ResultCode.Success;
         }
@@ -1007,11 +1132,11 @@ namespace Ryujinx.HLE.HOS.Services.Hid
 
             byte[] vibrationDeviceHandleBuffer = new byte[context.Request.PtrBuff[0].Size];
 
-            context.Memory.Read((ulong)context.Request.PtrBuff[0].Position, vibrationDeviceHandleBuffer);
+            context.Memory.Read(context.Request.PtrBuff[0].Position, vibrationDeviceHandleBuffer);
 
             byte[] vibrationValueBuffer = new byte[context.Request.PtrBuff[1].Size];
 
-            context.Memory.Read((ulong)context.Request.PtrBuff[1].Position, vibrationValueBuffer);
+            context.Memory.Read(context.Request.PtrBuff[1].Position, vibrationValueBuffer);
 
             // TODO: Read all handles and values from buffer.
 
@@ -1067,6 +1192,21 @@ namespace Ryujinx.HLE.HOS.Services.Hid
         public ResultCode EndPermitVibrationSession(ServiceCtx context)
         {
             Logger.Stub?.PrintStub(LogClass.ServiceHid);
+
+            return ResultCode.Success;
+        }
+
+        [CommandHipc(211)] // 7.0.0+
+        // IsVibrationDeviceMounted(nn::hid::VibrationDeviceHandle, nn::applet::AppletResourceUserId)
+        public ResultCode IsVibrationDeviceMounted(ServiceCtx context)
+        {
+            int  vibrationDeviceHandle = context.RequestData.ReadInt32();
+            long appletResourceUserId  = context.RequestData.ReadInt64();
+
+            // NOTE: Service use vibrationDeviceHandle to get the PlayerIndex.
+            //       And return false if (npadIdType >= (NpadIdType)8 && npadIdType != NpadIdType.Handheld && npadIdType != NpadIdType.Unknown)
+
+            context.ResponseData.Write(true);
 
             return ResultCode.Success;
         }

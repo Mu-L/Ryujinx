@@ -1,4 +1,4 @@
-using OpenTK.Graphics;
+﻿using OpenTK.Graphics;
 using OpenTK.Graphics.OpenGL;
 using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Logging;
@@ -27,6 +27,8 @@ namespace Ryujinx.Graphics.OpenGL
         internal TextureCopy TextureCopy => BackgroundContextWorker.InBackground ? _backgroundTextureCopy : _textureCopy;
 
         private Sync _sync;
+
+        public event EventHandler<ScreenCaptureImageInfo> ScreenCaptured;
 
         internal ResourcePool ResourcePool { get; }
 
@@ -96,7 +98,9 @@ namespace Ryujinx.Graphics.OpenGL
             return new Capabilities(
                 HwCapabilities.SupportsAstcCompression,
                 HwCapabilities.SupportsImageLoadFormatted,
+                HwCapabilities.SupportsMismatchingViewFormat,
                 HwCapabilities.SupportsNonConstantTextureOffset,
+                HwCapabilities.SupportsTextureShadowLod,
                 HwCapabilities.SupportsViewportSwizzle,
                 HwCapabilities.MaximumComputeSharedMemorySize,
                 HwCapabilities.MaximumSupportedAnisotropy,
@@ -129,6 +133,11 @@ namespace Ryujinx.Graphics.OpenGL
             Debugger.Initialize(glLogLevel);
 
             PrintGpuInformation();
+
+            if (HwCapabilities.SupportsParallelShaderCompile)
+            {
+                GL.Arb.MaxShaderCompilerThreads(Math.Min(Environment.ProcessorCount, 8));
+            }
 
             _counters.Initialize();
         }
@@ -177,16 +186,7 @@ namespace Ryujinx.Graphics.OpenGL
 
         public IProgram LoadProgramBinary(byte[] programBinary)
         {
-            Program program = new Program(programBinary);
-
-            if (program.IsLinked)
-            {
-                return program;
-            }
-
-            program.Dispose();
-
-            return null;
+            return new Program(programBinary);
         }
 
         public void CreateSync(ulong id)
@@ -197,6 +197,16 @@ namespace Ryujinx.Graphics.OpenGL
         public void WaitSync(ulong id)
         {
             _sync.Wait(id);
+        }
+
+        public void Screenshot()
+        {
+            _window.ScreenCaptureRequested = true;
+        }
+
+        public void OnScreenCaptured(ScreenCaptureImageInfo bitmap)
+        {
+            ScreenCaptured?.Invoke(this, bitmap);
         }
     }
 }

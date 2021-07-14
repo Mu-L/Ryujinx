@@ -7,6 +7,7 @@ using LibHac.FsSystem.NcaUtils;
 using Ryujinx.Common.Logging;
 using Ryujinx.HLE.FileSystem;
 using Ryujinx.HLE.HOS.SystemState;
+using Ryujinx.HLE.Utilities;
 using System;
 using System.IO;
 using System.Text;
@@ -29,7 +30,7 @@ namespace Ryujinx.HLE.HOS.Services.Settings
         // GetFirmwareVersion2() -> buffer<nn::settings::system::FirmwareVersion, 0x1a, 0x100>
         public ResultCode GetFirmwareVersion2(ServiceCtx context)
         {
-            long replyPos  = context.Request.RecvListBuff[0].Position;
+            ulong replyPos  = context.Request.RecvListBuff[0].Position;
 
             context.Response.PtrBuff[0] = context.Response.PtrBuff[0].WithSize(0x100L);
 
@@ -37,7 +38,7 @@ namespace Ryujinx.HLE.HOS.Services.Settings
 
             if (firmwareData != null)
             {
-                context.Memory.Write((ulong)replyPos, firmwareData);
+                context.Memory.Write(replyPos, firmwareData);
 
                 return ResultCode.Success;
             }
@@ -80,7 +81,7 @@ namespace Ryujinx.HLE.HOS.Services.Settings
 
                 writer.Write(Encoding.ASCII.GetBytes(build));
 
-                context.Memory.Write((ulong)replyPos, ms.ToArray());
+                context.Memory.Write(replyPos, ms.ToArray());
             }
 
             return ResultCode.Success;
@@ -110,19 +111,19 @@ namespace Ryujinx.HLE.HOS.Services.Settings
         // GetSettingsItemValueSize(buffer<nn::settings::SettingsName, 0x19>, buffer<nn::settings::SettingsItemKey, 0x19>) -> u64
         public ResultCode GetSettingsItemValueSize(ServiceCtx context)
         {
-            long classPos  = context.Request.PtrBuff[0].Position;
-            long classSize = context.Request.PtrBuff[0].Size;
+            ulong classPos  = context.Request.PtrBuff[0].Position;
+            ulong classSize = context.Request.PtrBuff[0].Size;
 
-            long namePos  = context.Request.PtrBuff[1].Position;
-            long nameSize = context.Request.PtrBuff[1].Size;
+            ulong namePos  = context.Request.PtrBuff[1].Position;
+            ulong nameSize = context.Request.PtrBuff[1].Size;
 
             byte[] classBuffer = new byte[classSize];
 
-            context.Memory.Read((ulong)classPos, classBuffer);
+            context.Memory.Read(classPos, classBuffer);
 
             byte[] nameBuffer = new byte[nameSize];
 
-            context.Memory.Read((ulong)namePos, nameBuffer);
+            context.Memory.Read(namePos, nameBuffer);
 
             string askedSetting = Encoding.ASCII.GetString(classBuffer).Trim('\0') + "!" + Encoding.ASCII.GetString(nameBuffer).Trim('\0');
 
@@ -159,22 +160,22 @@ namespace Ryujinx.HLE.HOS.Services.Settings
         // GetSettingsItemValue(buffer<nn::settings::SettingsName, 0x19, 0x48>, buffer<nn::settings::SettingsItemKey, 0x19, 0x48>) -> (u64, buffer<unknown, 6, 0>)
         public ResultCode GetSettingsItemValue(ServiceCtx context)
         {
-            long classPos  = context.Request.PtrBuff[0].Position;
-            long classSize = context.Request.PtrBuff[0].Size;
+            ulong classPos  = context.Request.PtrBuff[0].Position;
+            ulong classSize = context.Request.PtrBuff[0].Size;
 
-            long namePos  = context.Request.PtrBuff[1].Position;
-            long nameSize = context.Request.PtrBuff[1].Size;
+            ulong namePos  = context.Request.PtrBuff[1].Position;
+            ulong nameSize = context.Request.PtrBuff[1].Size;
 
-            long replyPos  = context.Request.ReceiveBuff[0].Position;
-            long replySize = context.Request.ReceiveBuff[0].Size;
+            ulong replyPos  = context.Request.ReceiveBuff[0].Position;
+            ulong replySize = context.Request.ReceiveBuff[0].Size;
 
             byte[] classBuffer = new byte[classSize];
 
-            context.Memory.Read((ulong)classPos, classBuffer);
+            context.Memory.Read(classPos, classBuffer);
 
             byte[] nameBuffer = new byte[nameSize];
 
-            context.Memory.Read((ulong)namePos, nameBuffer);
+            context.Memory.Read(namePos, nameBuffer);
 
             string askedSetting = Encoding.ASCII.GetString(classBuffer).Trim('\0') + "!" + Encoding.ASCII.GetString(nameBuffer).Trim('\0');
 
@@ -186,7 +187,7 @@ namespace Ryujinx.HLE.HOS.Services.Settings
 
                 if (nxSetting is string stringValue)
                 {
-                    if (stringValue.Length + 1 > replySize)
+                    if ((ulong)(stringValue.Length + 1) > replySize)
                     {
                         Logger.Error?.Print(LogClass.ServiceSet, $"{askedSetting} String value size is too big!");
                     }
@@ -209,7 +210,7 @@ namespace Ryujinx.HLE.HOS.Services.Settings
                     throw new NotImplementedException(nxSetting.GetType().Name);
                 }
 
-                context.Memory.Write((ulong)replyPos, settingBuffer);
+                context.Memory.Write(replyPos, settingBuffer);
 
                 Logger.Debug?.Print(LogClass.ServiceSet, $"{askedSetting} set value: {nxSetting} as {nxSetting.GetType()}");
             }
@@ -228,15 +229,68 @@ namespace Ryujinx.HLE.HOS.Services.Settings
             // NOTE: When set to true, is automatically synced with the internet.
             context.ResponseData.Write(true);
 
-            Logger.Stub?.PrintStub(LogClass.ServiceSet, "Stubbed");
+            Logger.Stub?.PrintStub(LogClass.ServiceSet);
+
+            return ResultCode.Success;
+        }
+
+        [CommandHipc(77)]
+        // GetDeviceNickName() -> buffer<nn::settings::system::DeviceNickName, 0x16>
+        public ResultCode GetDeviceNickName(ServiceCtx context)
+        {
+            ulong deviceNickNameBufferPosition = context.Request.ReceiveBuff[0].Position;
+            ulong deviceNickNameBufferSize     = context.Request.ReceiveBuff[0].Size;
+
+            if (deviceNickNameBufferPosition == 0)
+            {
+                return ResultCode.NullDeviceNicknameBuffer;
+            }
+
+            if (deviceNickNameBufferSize != 0x80)
+            {
+                Logger.Warning?.Print(LogClass.ServiceSet, "Wrong buffer size");
+            }
+
+            context.Memory.Write(deviceNickNameBufferPosition, Encoding.ASCII.GetBytes(context.Device.System.State.DeviceNickName + '\0'));
+
+            return ResultCode.Success;
+        }
+
+        [CommandHipc(78)]
+        // SetDeviceNickName(buffer<nn::settings::system::DeviceNickName, 0x15>)
+        public ResultCode SetDeviceNickName(ServiceCtx context)
+        {
+            ulong deviceNickNameBufferPosition = context.Request.SendBuff[0].Position;
+            ulong deviceNickNameBufferSize     = context.Request.SendBuff[0].Size;
+
+            byte[] deviceNickNameBuffer = new byte[deviceNickNameBufferSize];
+
+            context.Memory.Read(deviceNickNameBufferPosition, deviceNickNameBuffer);
+
+            context.Device.System.State.DeviceNickName = Encoding.ASCII.GetString(deviceNickNameBuffer);
+
+            return ResultCode.Success;
+        }
+
+        [CommandHipc(90)]
+        // GetMiiAuthorId() -> nn::util::Uuid
+        public ResultCode GetMiiAuthorId(ServiceCtx context)
+        {
+            // NOTE: If miiAuthorId is null ResultCode.NullMiiAuthorIdBuffer is returned.
+            //       Doesn't occur in our case.
+
+            UInt128 miiAuthorId = Mii.Helper.GetDeviceId();
+
+            miiAuthorId.Write(context.ResponseData);
 
             return ResultCode.Success;
         }
 
         public byte[] GetFirmwareData(Switch device)
         {
-            long   titleId     = 0x0100000000000809;
-            string contentPath = device.System.ContentManager.GetInstalledContentPath(titleId, StorageId.NandSystem, NcaContentType.Data);
+            const ulong SystemVersionTitleId = 0x0100000000000809;
+
+            string contentPath = device.System.ContentManager.GetInstalledContentPath(SystemVersionTitleId, StorageId.NandSystem, NcaContentType.Data);
 
             if (string.IsNullOrWhiteSpace(contentPath))
             {

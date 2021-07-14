@@ -3,7 +3,7 @@ using LibHac;
 
 namespace Ryujinx.HLE.HOS.Services.Fs
 {
-    class ISaveDataInfoReader : IpcService, IDisposable
+    class ISaveDataInfoReader : DisposableIpcService
     {
         private ReferenceCountedDisposable<LibHac.FsSrv.ISaveDataInfoReader> _baseReader;
 
@@ -16,22 +16,25 @@ namespace Ryujinx.HLE.HOS.Services.Fs
         // ReadSaveDataInfo() -> (u64, buffer<unknown, 6>)
         public ResultCode ReadSaveDataInfo(ServiceCtx context)
         {
-            long bufferPosition = context.Request.ReceiveBuff[0].Position;
-            long bufferLen      = context.Request.ReceiveBuff[0].Size;
+            ulong bufferPosition = context.Request.ReceiveBuff[0].Position;
+            ulong bufferLen      = context.Request.ReceiveBuff[0].Size;
 
             byte[] infoBuffer = new byte[bufferLen];
 
             Result result = _baseReader.Target.Read(out long readCount, infoBuffer);
 
-            context.Memory.Write((ulong)bufferPosition, infoBuffer);
+            context.Memory.Write(bufferPosition, infoBuffer);
             context.ResponseData.Write(readCount);
 
             return (ResultCode)result.Value;
         }
 
-        public void Dispose()
+        protected override void Dispose(bool isDisposing)
         {
-            _baseReader.Dispose();
+            if (isDisposing)
+            {
+                _baseReader?.Dispose();
+            }
         }
     }
 }

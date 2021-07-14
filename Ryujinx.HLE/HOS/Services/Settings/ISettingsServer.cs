@@ -1,6 +1,7 @@
 using Ryujinx.Common.Logging;
 using Ryujinx.HLE.HOS.SystemState;
 using System;
+using System.Text;
 
 namespace Ryujinx.HLE.HOS.Services.Settings
 {
@@ -117,11 +118,33 @@ namespace Ryujinx.HLE.HOS.Services.Settings
             return GetKeyCodeMapImpl(context, 2);
         }
 
-        public ResultCode GetKeyCodeMapImpl(ServiceCtx context, int version)
+        [CommandHipc(11)] // 10.1.0+
+        // GetDeviceNickName() -> buffer<nn::settings::system::DeviceNickName, 0x16>
+        public ResultCode GetDeviceNickName(ServiceCtx context)
+        {
+            ulong deviceNickNameBufferPosition = context.Request.ReceiveBuff[0].Position;
+            ulong deviceNickNameBufferSize     = context.Request.ReceiveBuff[0].Size;
+
+            if (deviceNickNameBufferPosition == 0)
+            {
+                return ResultCode.NullDeviceNicknameBuffer;
+            }
+
+            if (deviceNickNameBufferSize != 0x80)
+            {
+                Logger.Warning?.Print(LogClass.ServiceSet, "Wrong buffer size");
+            }
+
+            context.Memory.Write(deviceNickNameBufferPosition, Encoding.ASCII.GetBytes(context.Device.System.State.DeviceNickName + '\0'));
+
+            return ResultCode.Success;
+        }
+
+        private ResultCode GetKeyCodeMapImpl(ServiceCtx context, int version)
         {
             if (context.Request.ReceiveBuff[0].Size != 0x1000)
             {
-                Logger.Warning?.Print(LogClass.ServiceSet, "Bad size");
+                Logger.Warning?.Print(LogClass.ServiceSet, "Wrong buffer size");
             }
 
             byte[] keyCodeMap;
@@ -190,17 +213,17 @@ namespace Ryujinx.HLE.HOS.Services.Settings
                     break;
             }
 
-            context.Memory.Write((ulong)context.Request.ReceiveBuff[0].Position, keyCodeMap);
+            context.Memory.Write(context.Request.ReceiveBuff[0].Position, keyCodeMap);
 
             if (version == 1 && context.Device.System.State.DesiredKeyboardLayout == (long)KeyboardLayout.Default)
             {
-                context.Memory.Write((ulong)context.Request.ReceiveBuff[0].Position, (byte)0x01);
+                context.Memory.Write(context.Request.ReceiveBuff[0].Position, (byte)0x01);
             }
 
             return ResultCode.Success;
         }
 
-        public ResultCode GetAvailableLanguagesCodesImpl(ServiceCtx context, long position, long size, int maxSize)
+        private ResultCode GetAvailableLanguagesCodesImpl(ServiceCtx context, ulong position, ulong size, int maxSize)
         {
             int count = (int)(size / 8);
 
@@ -211,7 +234,7 @@ namespace Ryujinx.HLE.HOS.Services.Settings
 
             for (int index = 0; index < count; index++)
             {
-                context.Memory.Write((ulong)position, SystemStateMgr.GetLanguageCode(index));
+                context.Memory.Write(position, SystemStateMgr.GetLanguageCode(index));
 
                 position += 8;
             }

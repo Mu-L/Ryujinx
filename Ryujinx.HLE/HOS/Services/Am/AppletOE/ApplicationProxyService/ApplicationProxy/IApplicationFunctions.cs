@@ -57,7 +57,7 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.Applicati
             switch (kind)
             {
                 case LaunchParameterKind.UserChannel:
-                    storageData = context.Device.UserChannelPersistence.Pop();
+                    storageData = context.Device.Configuration.UserChannelPersistence.Pop();
                     break;
                 case LaunchParameterKind.PreselectedUser:
                     // Only the first 0x18 bytes of the Data seems to be actually used.
@@ -75,6 +75,26 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.Applicati
             }
 
             MakeObject(context, new AppletAE.IStorage(storageData));
+
+            return ResultCode.Success;
+        }
+
+        [CommandHipc(12)] // 4.0.0+
+        // CreateApplicationAndRequestToStart(u64 title_id)
+        public ResultCode CreateApplicationAndRequestToStart(ServiceCtx context)
+        {
+            ulong titleId = context.RequestData.ReadUInt64();
+
+            Logger.Stub?.PrintStub(LogClass.ServiceAm, new { titleId });
+
+            if (titleId == 0)
+            {
+                context.Device.UiHandler.ExecuteProgram(context.Device, ProgramSpecifyKind.RestartProgram, titleId);
+            }
+            else
+            {
+                throw new NotImplementedException();
+            }
 
             return ResultCode.Success;
         }
@@ -359,13 +379,13 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.Applicati
         // SetApplicationCopyrightImage(buffer<bytes, 0x45> frame_buffer, s32 x, s32 y, s32 width, s32 height, s32 window_origin_mode)
         public ResultCode SetApplicationCopyrightImage(ServiceCtx context)
         {
-            long frameBufferPos   = context.Request.SendBuff[0].Position;
-            long frameBufferSize  = context.Request.SendBuff[0].Size;
-            int  x                = context.RequestData.ReadInt32();
-            int  y                = context.RequestData.ReadInt32();
-            int  width            = context.RequestData.ReadInt32();
-            int  height           = context.RequestData.ReadInt32();
-            uint windowOriginMode = context.RequestData.ReadUInt32();
+            ulong frameBufferPos   = context.Request.SendBuff[0].Position;
+            ulong frameBufferSize  = context.Request.SendBuff[0].Size;
+            int   x                = context.RequestData.ReadInt32();
+            int   y                = context.RequestData.ReadInt32();
+            int   width            = context.RequestData.ReadInt32();
+            int   height           = context.RequestData.ReadInt32();
+            uint  windowOriginMode = context.RequestData.ReadUInt32();
 
             ResultCode resultCode = ResultCode.InvalidParameters;
 
@@ -388,7 +408,7 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.Applicati
             return resultCode;
         }
 
-        private ResultCode SetApplicationCopyrightImageImpl(int x, int y, int width, int height, long frameBufferPos, long frameBufferSize, uint windowOriginMode)
+        private ResultCode SetApplicationCopyrightImageImpl(int x, int y, int width, int height, ulong frameBufferPos, ulong frameBufferSize, uint windowOriginMode)
         {
             /*
             if (_copyrightBuffer == null)
@@ -453,7 +473,7 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.Applicati
         // ClearUserChannel()
         public ResultCode ClearUserChannel(ServiceCtx context)
         {
-            context.Device.UserChannelPersistence.Clear();
+            context.Device.Configuration.UserChannelPersistence.Clear();
 
             return ResultCode.Success;
         }
@@ -464,7 +484,7 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.Applicati
         {
             AppletAE.IStorage data = GetObject<AppletAE.IStorage>(context, 0);
 
-            context.Device.UserChannelPersistence.Push(data.Data);
+            context.Device.Configuration.UserChannelPersistence.Push(data.Data);
 
             return ResultCode.Success;
         }
@@ -473,7 +493,7 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.Applicati
         // GetPreviousProgramIndex() -> s32 program_index
         public ResultCode GetPreviousProgramIndex(ServiceCtx context)
         {
-            int previousProgramIndex = context.Device.UserChannelPersistence.PreviousIndex;
+            int previousProgramIndex = context.Device.Configuration.UserChannelPersistence.PreviousIndex;
 
             context.ResponseData.Write(previousProgramIndex);
 

@@ -1,5 +1,6 @@
 using Gtk;
 using Ryujinx.Audio.Backends.OpenAL;
+using Ryujinx.Audio.Backends.SDL2;
 using Ryujinx.Audio.Backends.SoundIo;
 using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Configuration.Hid;
@@ -49,9 +50,13 @@ namespace Ryujinx.Ui.Windows
         [GUI] CheckButton     _shaderCacheToggle;
         [GUI] CheckButton     _ptcToggle;
         [GUI] CheckButton     _fsicToggle;
+        [GUI] RadioButton     _mmSoftware;
+        [GUI] RadioButton     _mmHost;
+        [GUI] RadioButton     _mmHostUnsafe;
         [GUI] CheckButton     _expandRamToggle;
         [GUI] CheckButton     _ignoreToggle;
         [GUI] CheckButton     _directKeyboardAccess;
+        [GUI] CheckButton     _directMouseAccess;
         [GUI] ComboBoxText    _systemLanguageSelect;
         [GUI] ComboBoxText    _systemRegionSelect;
         [GUI] Entry           _systemTimeZoneEntry;
@@ -213,6 +218,19 @@ namespace Ryujinx.Ui.Windows
                 _fsicToggle.Click();
             }
 
+            switch (ConfigurationState.Instance.System.MemoryManagerMode.Value)
+            {
+                case MemoryManagerMode.SoftwarePageTable:
+                    _mmSoftware.Click();
+                    break;
+                case MemoryManagerMode.HostMapped:
+                    _mmHost.Click();
+                    break;
+                case MemoryManagerMode.HostMappedUnsafe:
+                    _mmHostUnsafe.Click();
+                    break;
+            }
+
             if (ConfigurationState.Instance.System.ExpandRam)
             {
                 _expandRamToggle.Click();
@@ -226,6 +244,11 @@ namespace Ryujinx.Ui.Windows
             if (ConfigurationState.Instance.Hid.EnableKeyboard)
             {
                 _directKeyboardAccess.Click();
+            }
+
+            if (ConfigurationState.Instance.Hid.EnableMouse)
+            {
+                _directMouseAccess.Click();
             }
 
             if (ConfigurationState.Instance.Ui.EnableCustomTheme)
@@ -262,7 +285,7 @@ namespace Ryujinx.Ui.Windows
             }
 
             _systemTimeZoneEntry.WidthChars = Math.Max(20, maxLocationLength + 1); // Ensure minimum Entry width
-            _systemTimeZoneEntry.Text = _timeZoneContentManager.SanityCheckDeviceLocationName();
+            _systemTimeZoneEntry.Text = _timeZoneContentManager.SanityCheckDeviceLocationName(ConfigurationState.Instance.System.TimeZone);
 
             _systemTimeZoneCompletion.MatchFunc = TimeZoneMatchFunc;
 
@@ -302,6 +325,7 @@ namespace Ryujinx.Ui.Windows
 
             TreeIter openAlIter  = _audioBackendStore.AppendValues("OpenAL", AudioBackend.OpenAl);
             TreeIter soundIoIter = _audioBackendStore.AppendValues("SoundIO", AudioBackend.SoundIo);
+            TreeIter sdl2Iter    = _audioBackendStore.AppendValues("SDL2", AudioBackend.SDL2);
             TreeIter dummyIter   = _audioBackendStore.AppendValues("Dummy", AudioBackend.Dummy);
 
             _audioBackendSelect = ComboBox.NewWithModelAndEntry(_audioBackendStore);
@@ -316,6 +340,9 @@ namespace Ryujinx.Ui.Windows
                 case AudioBackend.SoundIo:
                     _audioBackendSelect.SetActiveIter(soundIoIter);
                     break;
+                case AudioBackend.SDL2:
+                    _audioBackendSelect.SetActiveIter(sdl2Iter);
+                    break;
                 case AudioBackend.Dummy:
                     _audioBackendSelect.SetActiveIter(dummyIter);
                     break;
@@ -328,11 +355,13 @@ namespace Ryujinx.Ui.Windows
 
             bool openAlIsSupported  = false;
             bool soundIoIsSupported = false;
+            bool sdl2IsSupported    = false;
 
             Task.Run(() =>
             {
                 openAlIsSupported  = OpenALHardwareDeviceDriver.IsSupported;
                 soundIoIsSupported = SoundIoHardwareDeviceDriver.IsSupported;
+                sdl2IsSupported    = SDL2HardwareDeviceDriver.IsSupported;
             });
 
             // This function runs whenever the dropdown is opened
@@ -342,6 +371,7 @@ namespace Ryujinx.Ui.Windows
                 {
                     AudioBackend.OpenAl  => openAlIsSupported,
                     AudioBackend.SoundIo => soundIoIsSupported,
+                    AudioBackend.SDL2    => sdl2IsSupported,
                     AudioBackend.Dummy   => true,
                     _ => throw new ArgumentOutOfRangeException()
                 };
@@ -403,6 +433,18 @@ namespace Ryujinx.Ui.Windows
                 ConfigurationState.Instance.System.TimeZone.Value = _systemTimeZoneEntry.Text;
             }
 
+            MemoryManagerMode memoryMode = MemoryManagerMode.SoftwarePageTable;
+
+            if (_mmHost.Active)
+            {
+                memoryMode = MemoryManagerMode.HostMapped;
+            }
+
+            if (_mmHostUnsafe.Active)
+            {
+                memoryMode = MemoryManagerMode.HostMappedUnsafe;
+            }
+
             ConfigurationState.Instance.Logger.EnableError.Value               = _errorLogToggle.Active;
             ConfigurationState.Instance.Logger.EnableWarn.Value                = _warningLogToggle.Active;
             ConfigurationState.Instance.Logger.EnableInfo.Value                = _infoLogToggle.Active;
@@ -421,9 +463,11 @@ namespace Ryujinx.Ui.Windows
             ConfigurationState.Instance.Graphics.EnableShaderCache.Value       = _shaderCacheToggle.Active;
             ConfigurationState.Instance.System.EnablePtc.Value                 = _ptcToggle.Active;
             ConfigurationState.Instance.System.EnableFsIntegrityChecks.Value   = _fsicToggle.Active;
+            ConfigurationState.Instance.System.MemoryManagerMode.Value         = memoryMode;
             ConfigurationState.Instance.System.ExpandRam.Value                 = _expandRamToggle.Active;
             ConfigurationState.Instance.System.IgnoreMissingServices.Value     = _ignoreToggle.Active;
             ConfigurationState.Instance.Hid.EnableKeyboard.Value               = _directKeyboardAccess.Active;
+            ConfigurationState.Instance.Hid.EnableMouse.Value                  = _directMouseAccess.Active;
             ConfigurationState.Instance.Ui.EnableCustomTheme.Value             = _custThemeToggle.Active;
             ConfigurationState.Instance.System.Language.Value                  = Enum.Parse<Language>(_systemLanguageSelect.ActiveId);
             ConfigurationState.Instance.System.Region.Value                    = Enum.Parse<Configuration.System.Region>(_systemRegionSelect.ActiveId);
@@ -454,7 +498,7 @@ namespace Ryujinx.Ui.Windows
         {
             if (!_validTzRegions.Contains(_systemTimeZoneEntry.Text))
             {
-                _systemTimeZoneEntry.Text = _timeZoneContentManager.SanityCheckDeviceLocationName();
+                _systemTimeZoneEntry.Text = _timeZoneContentManager.SanityCheckDeviceLocationName(ConfigurationState.Instance.System.TimeZone);
             }
         }
 
